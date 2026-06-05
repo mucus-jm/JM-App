@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { HelpCircle, Sparkles, MessageSquare, Plus, ArrowRight, ShieldAlert, Calendar, Zap, Check, CheckSquare } from 'lucide-react';
+import { HelpCircle, Sparkles, MessageSquare, Plus, ArrowRight, ShieldAlert, Calendar, Zap, Check, CheckSquare, Trash2 } from 'lucide-react';
 import { Employee, AttendanceRecord, HolidayRecord, AttendanceStatus } from '../types';
 import { formatDateLabel, getDayName, isStandardWeekend } from '../utils/dateHelpers';
 
@@ -137,13 +137,16 @@ export default function AttendanceTable({
   // Quick header click to trigger inline custom holiday editor
   const handleHeaderClick = (dateStr: string, e: React.MouseEvent) => {
     const hol = getHolidayInfo(dateStr);
-    setIsHolidayInput(hol.isHoliday);
-    setHolidayNameInput(hol.isHoliday ? (hol.name === 'Weekend' ? '' : hol.name) : '');
+    setIsHolidayInput(!!hol?.isHoliday);
+    setHolidayNameInput(hol?.isHoliday ? (hol.name === 'Weekend' ? '' : hol.name) : '');
+
+    const x = e ? e.clientX : 200;
+    const y = e ? e.clientY : 200;
 
     setActiveHolidayPopover({
       date: dateStr,
-      clientX: Math.min(e.clientX, window.innerWidth - 300),
-      clientY: Math.min(e.clientY, window.innerHeight - 300),
+      clientX: Math.max(10, Math.min(x, window.innerWidth - 320)),
+      clientY: Math.max(10, Math.min(y, window.innerHeight - 300)),
     });
   };
 
@@ -168,7 +171,7 @@ export default function AttendanceTable({
     if (bulkDateScope === 'workdays') {
       targetDates = dates.filter(d => {
         const hol = getHolidayInfo(d);
-        return !hol.isHoliday;
+        return !hol?.isHoliday;
       });
     } else if (bulkDateScope === 'all-dates') {
       targetDates = dates;
@@ -185,7 +188,7 @@ export default function AttendanceTable({
       `Sistem akan mengubah status kehadiran untuk:\n` +
       `- Karyawan: ${bulkEmployeeScope === 'all' ? 'Semua Karyawan' : employees.find(e => e.id === bulkEmployeeScope)?.name}\n` +
       `- Tanggal: ${bulkDateScope === 'workdays' ? 'Semua Hari Kerja' : bulkDateScope === 'all-dates' ? 'Semua Hari (termasuk Weekend)' : bulkDateScope}\n` +
-      `- Status Baru: ${STATUS_CONFIG[bulkStatus]?.desc || 'Kosong'} (${bulkStatus})\n\n` +
+      `- Status Baru: ${STATUS_CONFIG[bulkStatus]?.desc || 'Kosong / Clear'} (${bulkStatus || 'CLEAR'})\n\n` +
       `Apakah Anda yakin ingin menerapkan perubahan secara massal?`
     );
 
@@ -212,7 +215,7 @@ export default function AttendanceTable({
   const handleAutoFillWorkdaysPresent = () => {
     const targetDates = dates.filter(d => {
       const hol = getHolidayInfo(d);
-      return !hol.isHoliday;
+      return !hol?.isHoliday;
     });
 
     const updates: { employeeId: string; date: string; status: AttendanceStatus }[] = [];
@@ -245,6 +248,31 @@ export default function AttendanceTable({
 
     onUpdateRecordBulk(updates);
     alert(`Berhasil mengisi ${updates.length} sel kosong hari kerja dengan status 'M' secara otomatis.`);
+  };
+
+  // Clear all attendance record in the grid completely
+  const handleClearAllAttendance = () => {
+    const isConfirmed = window.confirm(
+      '⚠️ PERINGATAN KOSONGKAN SEMENTARA:\n' +
+      'Apakah Anda benar-benar yakin ingin mengosongkan SELURUH data kehadiran untuk semua karyawan di periode ini?\n' +
+      'Tindakan ini akan menghapus semua status kehadiran terisi pada grid ini.'
+    );
+
+    if (!isConfirmed) return;
+
+    const updates: { employeeId: string; date: string; status: AttendanceStatus }[] = [];
+    employees.forEach(emp => {
+      dates.forEach(date => {
+        updates.push({
+          employeeId: emp.id,
+          date,
+          status: '',
+        });
+      });
+    });
+
+    onUpdateRecordBulk(updates);
+    alert('Seluruh data kehadiran pada periode ini berhasil dikosongkan!');
   };
 
   return (
@@ -306,6 +334,16 @@ export default function AttendanceTable({
           >
             <Sparkles className="w-3.5 h-3.5 text-teal-600 animate-pulse" />
             <span>🪄 Auto-Isi Semua Hari Kerja ('M')</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleClearAllAttendance}
+            className="flex items-center gap-1.5 bg-rose-50 hover:bg-rose-100 border border-rose-200 text-rose-800 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none"
+            title="Kosongkan seluruh data kehadiran pada tabel periode ini"
+          >
+            <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+            <span>📋 Kosongkan Seluruh Absensi</span>
           </button>
         </div>
 
@@ -373,25 +411,25 @@ export default function AttendanceTable({
             {/* 3. Status selection */}
             <div className="space-y-1.5">
               <label className="block text-[10px] font-bold text-gray-500 tracking-wider uppercase">
-                3. Tentukan Kehadiran
+                3. Kehadiran / Kosongkan
               </label>
               <div className="flex flex-wrap gap-1 bg-white p-1 border border-slate-200 rounded-lg">
-                {(['M', 'D', 'TM', 'I', 'S', 'C'] as AttendanceStatus[]).map(status => {
+                {(['M', 'D', 'TM', 'I', 'S', 'C', ''] as AttendanceStatus[]).map(status => {
                   const config = STATUS_CONFIG[status];
                   const isSelected = bulkStatus === status;
                   return (
                     <button
-                      key={status}
+                      key={status || 'clear'}
                       type="button"
                       onClick={() => setBulkStatus(status)}
-                      title={config.desc}
+                      title={config?.desc || 'Kosongkan / Bersihkan'}
                       className={`flex-1 h-7 rounded text-[11px] font-bold transition flex items-center justify-center cursor-pointer ${
                         isSelected 
-                          ? `${config.bg} ${config.text} ring-1 ring-offset-0 ring-[#2ba0af]` 
+                          ? `${config?.bg || 'bg-slate-100'} ${config?.text || 'text-slate-600'} ring-1 ring-offset-0 ring-[#2ba0af]` 
                           : 'bg-transparent text-slate-400 hover:bg-slate-50'
                       }`}
                     >
-                      {status}
+                      {status || 'CLEAR'}
                     </button>
                   );
                 })}
@@ -588,7 +626,7 @@ export default function AttendanceTable({
           {/* Status Selection Buttons */}
           <div>
             <label className="block text-[10px] font-semibold text-gray-400 tracking-wider uppercase mb-1.5 text-left">
-              Status Absensi
+              Status Absensi (Klik langsung simpan)
             </label>
             <div className="grid grid-cols-4 gap-1.5">
               {(['M', 'D', 'TM', 'I', 'S', 'C'] as AttendanceStatus[]).map(st => {
@@ -598,7 +636,11 @@ export default function AttendanceTable({
                 return (
                   <button
                     key={st}
-                    onClick={() => setStatusInput(st)}
+                    onClick={() => {
+                      setStatusInput(st);
+                      onUpdateRecord(activePopover.empId, activePopover.date, st, notesInput);
+                      setActivePopover(null);
+                    }}
                     className={`h-9 flex flex-col items-center justify-center rounded-lg text-xs font-black border transition-all cursor-pointer ${
                       isSelected
                         ? 'border-[#3bc3d1] bg-[#e0f9fa]/60 text-[#2ba0af] scale-105'
@@ -612,7 +654,11 @@ export default function AttendanceTable({
                 );
               })}
               <button
-                onClick={() => setStatusInput('NA')}
+                onClick={() => {
+                  setStatusInput('NA');
+                  onUpdateRecord(activePopover.empId, activePopover.date, 'NA', notesInput);
+                  setActivePopover(null);
+                }}
                 className={`h-9 border text-xs font-semibold rounded-lg flex items-center justify-center cursor-pointer ${
                   statusInput === 'NA' ? 'border-slate-800 bg-slate-900 text-white' : 'border-slate-100 bg-white hover:bg-slate-50 text-slate-700'
                 }`}
@@ -621,7 +667,11 @@ export default function AttendanceTable({
                 Blackout
               </button>
               <button
-                onClick={() => setStatusInput('')}
+                onClick={() => {
+                  setStatusInput('');
+                  onUpdateRecord(activePopover.empId, activePopover.date, '', notesInput);
+                  setActivePopover(null);
+                }}
                 className={`h-9 border text-xs font-semibold rounded-lg flex items-center justify-center cursor-pointer ${
                   statusInput === '' ? 'border-[#312521] bg-[#ececec] text-slate-500' : 'border-slate-100 bg-white hover:bg-slate-50 text-slate-400'
                 }`}
