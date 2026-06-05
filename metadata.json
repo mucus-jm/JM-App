@@ -1,0 +1,6 @@
+{
+  "name": "Aplikasi Absensi Karyawan",
+  "description": "Aplikasi absensi karyawan sederhana dengan rekapitulasi cutoff gajian real-time yang tersambung langsung dengan Google Sheets.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
