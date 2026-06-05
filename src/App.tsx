@@ -144,6 +144,48 @@ export default function App() {
     }
   };
 
+  // Handle mass/bulk attendance updates
+  const handleUpdateRecordBulk = (
+    updates: { employeeId: string; date: string; status: AttendanceStatus; notes?: string }[]
+  ) => {
+    const updatesMap = new Map<string, { status: AttendanceStatus; notes?: string }>();
+    updates.forEach(u => {
+      updatesMap.set(`${u.employeeId}_${u.date}`, { status: u.status, notes: u.notes });
+    });
+
+    const updated = attendance.map(r => {
+      const u = updatesMap.get(`${r.employeeId}_${r.date}`);
+      if (u) {
+        return { 
+          ...r, 
+          status: u.status, 
+          notes: u.notes !== undefined ? u.notes : r.notes 
+        };
+      }
+      return r;
+    });
+
+    // Handle any updates that might not be in the current list yet
+    updates.forEach(u => {
+      const exists = updated.some(r => r.employeeId === u.employeeId && r.date === u.date);
+      if (!exists) {
+        updated.push({
+          employeeId: u.employeeId,
+          date: u.date,
+          status: u.status,
+          notes: u.notes,
+        });
+      }
+    });
+
+    setAttendance(updated);
+
+    // Dynamic background save of total dataset to Google Sheets if connected
+    if (sheetsConfig.isConnected && sheetsConfig.webAppUrl) {
+      triggerBackgroundSheetsSync(updated, employees, dates, holidays, cutoff.name);
+    }
+  };
+
   // Toggle/Set Holiday status of a date explicitly
   const handleToggleHoliday = (date: string, isHoliday: boolean, name?: string) => {
     let updated: HolidayRecord[] = [];
@@ -450,6 +492,7 @@ export default function App() {
             attendance={attendance}
             holidays={holidays}
             onUpdateRecord={handleUpdateRecord}
+            onUpdateRecordBulk={handleUpdateRecordBulk}
             onToggleHoliday={handleToggleHoliday}
             periodName={cutoff.name}
           />

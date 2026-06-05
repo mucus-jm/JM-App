@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { HelpCircle, Sparkles, MessageSquare, Plus, ArrowRight, ShieldAlert } from 'lucide-react';
+import { HelpCircle, Sparkles, MessageSquare, Plus, ArrowRight, ShieldAlert, Calendar, Zap, Check, CheckSquare } from 'lucide-react';
 import { Employee, AttendanceRecord, HolidayRecord, AttendanceStatus } from '../types';
 import { formatDateLabel, getDayName, isStandardWeekend } from '../utils/dateHelpers';
 
@@ -9,6 +9,9 @@ interface AttendanceTableProps {
   attendance: AttendanceRecord[];
   holidays: HolidayRecord[];
   onUpdateRecord: (empId: string, date: string, status: AttendanceStatus, notes?: string) => void;
+  onUpdateRecordBulk: (
+    updates: { employeeId: string; date: string; status: AttendanceStatus; notes?: string }[]
+  ) => void;
   onToggleHoliday: (date: string, isHoliday: boolean, name?: string) => void;
   periodName: string;
 }
@@ -19,6 +22,7 @@ export default function AttendanceTable({
   attendance,
   holidays,
   onUpdateRecord,
+  onUpdateRecordBulk,
   onToggleHoliday,
   periodName,
 }: AttendanceTableProps) {
@@ -60,6 +64,13 @@ export default function AttendanceTable({
       document.removeEventListener('mousedown', handleClickOutside);
     };
   }, []);
+
+  // --- BULK OPERATIONS STATE & LOGIC ---
+  const [isBulkPanelOpen, setIsBulkPanelOpen] = useState(false);
+  const [bulkEmployeeScope, setBulkEmployeeScope] = useState<'all' | string>('all');
+  const [bulkDateScope, setBulkDateScope] = useState<'workdays' | 'all-dates' | string>('workdays');
+  const [bulkStatus, setBulkStatus] = useState<AttendanceStatus>('M');
+  const [bulkNotes, setBulkNotes] = useState('');
 
   // Helper check if date is holiday
   const getHolidayInfo = (dateStr: string) => {
@@ -142,6 +153,100 @@ export default function AttendanceTable({
     setActiveHolidayPopover(null);
   };
 
+  // Handler for custom bulk updates
+  const handleApplyBulkUpdate = () => {
+    const targetEmployees = bulkEmployeeScope === 'all' 
+      ? employees 
+      : employees.filter(e => e.id === bulkEmployeeScope);
+
+    if (targetEmployees.length === 0) {
+      alert('Pilih karyawan terlebih dahulu.');
+      return;
+    }
+
+    let targetDates: string[] = [];
+    if (bulkDateScope === 'workdays') {
+      targetDates = dates.filter(d => {
+        const hol = getHolidayInfo(d);
+        return !hol.isHoliday;
+      });
+    } else if (bulkDateScope === 'all-dates') {
+      targetDates = dates;
+    } else {
+      targetDates = [bulkDateScope];
+    }
+
+    if (targetDates.length === 0) {
+      alert('Tentukan tanggal target update.');
+      return;
+    }
+
+    const isConfirmed = window.confirm(
+      `Sistem akan mengubah status kehadiran untuk:\n` +
+      `- Karyawan: ${bulkEmployeeScope === 'all' ? 'Semua Karyawan' : employees.find(e => e.id === bulkEmployeeScope)?.name}\n` +
+      `- Tanggal: ${bulkDateScope === 'workdays' ? 'Semua Hari Kerja' : bulkDateScope === 'all-dates' ? 'Semua Hari (termasuk Weekend)' : bulkDateScope}\n` +
+      `- Status Baru: ${STATUS_CONFIG[bulkStatus]?.desc || 'Kosong'} (${bulkStatus})\n\n` +
+      `Apakah Anda yakin ingin menerapkan perubahan secara massal?`
+    );
+
+    if (!isConfirmed) return;
+
+    const updates: { employeeId: string; date: string; status: AttendanceStatus; notes?: string }[] = [];
+    targetEmployees.forEach(emp => {
+      targetDates.forEach(date => {
+        updates.push({
+          employeeId: emp.id,
+          date,
+          status: bulkStatus,
+          notes: bulkNotes || undefined
+        });
+      });
+    });
+
+    onUpdateRecordBulk(updates);
+    setBulkNotes('');
+    alert(`Berhasil meng-update ${updates.length} records absensi secara massal.`);
+  };
+
+  // Magic auto-filler for empty workdays
+  const handleAutoFillWorkdaysPresent = () => {
+    const targetDates = dates.filter(d => {
+      const hol = getHolidayInfo(d);
+      return !hol.isHoliday;
+    });
+
+    const updates: { employeeId: string; date: string; status: AttendanceStatus }[] = [];
+    
+    employees.forEach(emp => {
+      targetDates.forEach(date => {
+        const record = attendance.find(r => r.employeeId === emp.id && r.date === date);
+        if (!record || !record.status) {
+          updates.push({
+            employeeId: emp.id,
+            date,
+            status: 'M',
+          });
+        }
+      });
+    });
+
+    if (updates.length === 0) {
+      alert('Semua hari kerja untuk seluruh karyawan sudah terisi (tidak ada sel kosong).');
+      return;
+    }
+
+    const isConfirmed = window.confirm(
+      `🪄 Auto-Isi Kehadiran:\n` +
+      `Sistem mendeteksi ada ${updates.length} sel absen hari kerja yang masih kosong.\n` +
+      `Apakah Anda ingin mengisi otomatis seluruh sel kosong ini dengan status "M" (Masuk Kerja)?`
+    );
+
+    if (!isConfirmed) return;
+
+    onUpdateRecordBulk(updates);
+    alert(`Berhasil mengisi ${updates.length} sel kosong hari kerja dengan status 'M' secara otomatis.`);
+  };
+
   return (
     <div className="flex flex-col h-full bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
       {/* Top Legend Bar */}
@@ -176,6 +281,151 @@ export default function AttendanceTable({
           </div>
         </div>
       </div>
+
+      {/* Quick Toolbar Row */}
+      <div className="bg-white border-b border-gray-100 px-6 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setIsBulkPanelOpen(!isBulkPanelOpen)}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border text-xs font-bold transition cursor-pointer select-none ${
+              isBulkPanelOpen
+                ? 'bg-[#e0f9fa]/80 border-[#3bc3d1] text-[#2ba0af]'
+                : 'bg-white hover:bg-slate-50 border-slate-200 text-slate-700'
+            }`}
+          >
+            <Zap className={`w-3.5 h-3.5 ${isBulkPanelOpen ? 'fill-[#2ba0af]' : ''}`} />
+            <span>⚡ Grup / Input Massal</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handleAutoFillWorkdaysPresent}
+            className="flex items-center gap-1.5 bg-gradient-to-r from-teal-50 to-emerald-50 hover:from-teal-100 hover:to-emerald-100 border border-teal-200 text-emerald-800 px-3.5 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer select-none"
+            title="Satu klik untuk mengisi semua sel hari kerja yang kosong dengan status 'M'"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-teal-600 animate-pulse" />
+            <span>🪄 Auto-Isi Semua Hari Kerja ('M')</span>
+          </button>
+        </div>
+
+        <div className="text-[11px] text-gray-400 italic">
+          💡 Tips: Klik header kolom tanggal untuk mengubah/menset Hari Libur.
+        </div>
+      </div>
+
+      {/* Custom Bulk Update Form Card */}
+      {isBulkPanelOpen && (
+        <div className="bg-[#f8fafc] border-b border-slate-200/80 p-5 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200 text-left">
+          <div className="flex items-center gap-2 border-b border-slate-100 pb-2">
+            <Zap className="w-4 h-4 text-[#2ba0af] fill-[#2ba0af]" />
+            <h3 className="text-xs font-bold text-slate-800 uppercase tracking-wide">
+              Panel Pengisian Massal Absensi Karyawan
+            </h3>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            {/* 1. Employee Scope */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-gray-500 tracking-wider uppercase" htmlFor="bulk_employee_select">
+                1. Pilih Karyawan
+              </label>
+              <select
+                id="bulk_employee_select"
+                value={bulkEmployeeScope}
+                onChange={(e) => setBulkEmployeeScope(e.target.value)}
+                className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-[#3bc3d1] cursor-pointer"
+              >
+                <option value="all">👥 Semua Karyawan ({employees.length} orang)</option>
+                {employees.map(emp => (
+                  <option key={emp.id} value={emp.id}>👤 {emp.name}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* 2. Date Scope */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-gray-500 tracking-wider uppercase" htmlFor="bulk_date_select">
+                2. Pilih Waktu / Tanggal
+              </label>
+              <select
+                id="bulk_date_select"
+                value={bulkDateScope}
+                onChange={(e) => setBulkDateScope(e.target.value)}
+                className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-2 bg-white focus:outline-none focus:ring-1 focus:ring-[#3bc3d1] cursor-pointer"
+              >
+                <option value="workdays">💼 Semua Hari Kerja (Kecuali Sabtu, Minggu & Libur)</option>
+                <option value="all-dates">📅 Seluruh Hari Kalender (Termasuk Hari Libur)</option>
+                <optgroup label="Tanggal Spesifik">
+                  {dates.map(date => {
+                    const dayName = getDayName(date);
+                    const formatted = date.split('-').reverse().join('/');
+                    return (
+                      <option key={date} value={date}>
+                        {formatted} ({dayName})
+                      </option>
+                    );
+                  })}
+                </optgroup>
+              </select>
+            </div>
+
+            {/* 3. Status selection */}
+            <div className="space-y-1.5">
+              <label className="block text-[10px] font-bold text-gray-500 tracking-wider uppercase">
+                3. Tentukan Kehadiran
+              </label>
+              <div className="flex flex-wrap gap-1 bg-white p-1 border border-slate-200 rounded-lg">
+                {(['M', 'D', 'TM', 'I', 'S', 'C'] as AttendanceStatus[]).map(status => {
+                  const config = STATUS_CONFIG[status];
+                  const isSelected = bulkStatus === status;
+                  return (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setBulkStatus(status)}
+                      title={config.desc}
+                      className={`flex-1 h-7 rounded text-[11px] font-bold transition flex items-center justify-center cursor-pointer ${
+                        isSelected 
+                          ? `${config.bg} ${config.text} ring-1 ring-offset-0 ring-[#2ba0af]` 
+                          : 'bg-transparent text-slate-400 hover:bg-slate-50'
+                      }`}
+                    >
+                      {status}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* 4. Action button & Notes */}
+            <div className="flex gap-2">
+              <div className="flex-1 space-y-1.5">
+                <label className="block text-[10px] font-bold text-gray-500 tracking-wider uppercase" htmlFor="bulk_notes_input">
+                  Catatan (Opsional)
+                </label>
+                <input
+                  id="bulk_notes_input"
+                  type="text"
+                  value={bulkNotes}
+                  onChange={(e) => setBulkNotes(e.target.value)}
+                  placeholder="Contoh: Sakit Flu, Dispensasi"
+                  className="w-full text-xs border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white focus:outline-none focus:ring-1 focus:ring-[#3bc3d1]"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={handleApplyBulkUpdate}
+                className="bg-[#2ba0af] hover:bg-[#208491] hover:shadow text-white text-xs px-4 py-2 rounded-lg font-bold transition flex items-center gap-1 cursor-pointer h-9 shrink-0 self-end"
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>Terapkan</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main Combined Grid Container */}
       <div id="attendance_grid_wrapper" className="flex flex-1 overflow-auto max-h-[500px]">
